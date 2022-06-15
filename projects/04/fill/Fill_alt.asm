@@ -18,57 +18,56 @@
   D=D+A
   @last
   M=D
-  // color = 0
-  @color
-  M=0
 (WHITE)
   // if (KBD == 0) goto WHITE
   @KBD
   D=M
   @WHITE
   D;JEQ
-  // color = -1
-  @color
+  // address = SCREEN
+  @SCREEN
+  D=A
+  @address
+  M=D
+(FILLBLACK)
+  // RAM[address] = -1
+  @address
+  A=M
   M=-1
-  // goto FILL
-  @FILL
-  0;JMP
+  // address = address + 1
+  @address
+  M=M+1
+  // if (address <= last) goto FILLBLACK
+  D=M
+  @last
+  D=D-M
+  @FILLBLACK
+  D;JLE
+  // address = SCREEN
+  @SCREEN
+  D=A
+  @address
+  M=D
 (BLACK)
   // if (KBD > 0) goto BLACK
   @KBD
   D=M
   @BLACK
   D;JGT
-  // color = 0
-  @color
-  M=0
-(FILL)
-  // address = SCREEN
-  @SCREEN
-  D=A
-  @address
-  M=D
-(FILL_LOOP)
-  // RAM[address] = color
-  @color
-  D=M
+(FILLWHITE)
+  // RAM[address] = 0
   @address
   A=M
-  M=D
+  M=0
   // address = address + 1
   @address
   M=M+1
-  // if (address <= last) goto FILL
+  // if (address <= last) goto FILLWHITE
   D=M
   @last
   D=D-M
-  @FILL_LOOP
+  @FILLWHITE
   D;JLE
-  // if (color == 0) goto WHITE
-  @color
-  D=M
+  // goto WHITE
   @WHITE
-  D;JEQ
-  // else goto BLACK
-  @BLACK
   0;JMP
