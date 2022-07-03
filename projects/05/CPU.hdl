@@ -39,5 +39,57 @@ CHIP CPU {
         pc[15];          // address of next instruction
 
     PARTS:
-    // Put your code here:
+    Not       (in=instruction[15], out=notOp);
+
+    // select instruction if A-instruction, aluOut if C-instruction
+    Mux16     (a=instruction, b=aluOut, sel=instruction[15], out=aRegIn);
+
+    // only load A register if A-instruction or 3rd destination bit set
+    Or        (a=notOp, b=instruction[5], out=loadA);
+    ARegister (in=aRegIn, load=loadA, out=aRegOut, out[0..14]=addressM);
+
+    // only load D register if 2nd destination bit set
+    And       (a=instruction[15], b=instruction[4], out=loadD);
+    DRegister (in=aluOut, load=loadD, out=dRegOut);
+
+    // only select inM if C-instruction and 'a' bit set
+    And       (a=instruction[15], b=instruction[12], out=selAM);
+    Mux16     (a=aRegOut, b=inM, sel=selAM, out=aluIn);
+
+    ALU       (x=dRegOut,
+               y=aluIn,
+               zx=instruction[11],
+               nx=instruction[10],
+               zy=instruction[9],
+               ny=instruction[8],
+               f=instruction[7],
+               no=instruction[6],
+               out=aluOut, out=outM,
+               zr=zrOut,
+               ng=ngOut
+              );
+
+    // set writeM only if 1st destination bit set
+    And       (a=instruction[15], b=instruction[3], out=writeM);
+
+    // is gt if C-instruction, 1st jump bit set and both zrOut and ngOut are false
+    Not       (in=zrOut, out=notZr);
+    Not       (in=ngOut, out=notNg);
+    And       (a=instruction[15], b=instruction[0], out=jgt);
+    And       (a=jgt, b=notZr, out=isNotZr);
+    And       (a=isNotZr, b=notNg, out=isGt);
+
+    // is eq if C-instruction, 2nd jump bit set and zrOut is true
+    And       (a=instruction[15], b=instruction[1], out=jeq);
+    And       (a=jeq, b=zrOut, out=isEq);
+
+    // is lt if C-instruction, 3rd jump bit set and ngOut is true
+    And       (a=instruction[15], b=instruction[2], out=jlt);
+    And       (a=jlt, b=ngOut, out=isLt);
+
+    // do jump if isGt, isEq or isLt is true
+    Or        (a=isGt, b=isEq, out=isGtOrEq);
+    Or        (a=isLt, b=isGtOrEq, out=doJump);
+
+    PC        (in=aRegOut, load=doJump, inc=true, reset=reset, out[0..14]=pc);
 }
