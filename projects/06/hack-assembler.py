@@ -1,7 +1,6 @@
 #!usr/bin/python
 
 import argparse
-from platform import machine
 import sys
 from typing import List
 
@@ -60,7 +59,7 @@ JUMP_TABLE = {
 }
 
 SYMBOL_TABLE = {
-  'R0':     '0',
+  'R0':     '0', 
   'R1':     '1',
   'R2':     '2',
   'R3':     '3',
@@ -69,7 +68,7 @@ SYMBOL_TABLE = {
   'R6':     '6',
   'R7':     '7',
   'R8':     '8',
-  'R9':     '9',
+  'R9':     '9', 
   'R10':    '10',
   'R11':    '11',
   'R12':    '12',
@@ -89,137 +88,127 @@ SYMBOL_TABLE = {
 ADDRESS_SPACE_START = 16   # min
 ADDRESS_SPACE_END = 16383  # max
 
+UNDEFINED_VARIABLES_TABLE = {}  # key: variable name, value: list of line numbers
+
 
 class CInstruction():
   def __init__(self, instruction: str) -> None:
     self.instruction = instruction
+  
+  def get_machine_code(self) -> str:
+    return self.__repr__()
 
   def __repr__(self) -> str:
-    dest = DEST_TABLE[self.get_dest()]
-    comp = COMP_TABLE[self.get_comp()]
-    jump = JUMP_TABLE[self.get_jump()]
+    dest = DEST_TABLE[self._get_dest()]
+    comp = COMP_TABLE[self._get_comp()]
+    jump = JUMP_TABLE[self._get_jump()]
     return f'111{comp}{dest}{jump}'
 
-  def get_dest(self) -> str:
-    dest = self.instruction.split('=')[0] if self.has_dest() else 'null'
+  def _get_dest(self) -> str:
+    dest = self.instruction.split('=')[0] if self._has_dest() else 'null'
     return dest if dest == 'null' else ''.join(sorted(dest))
 
-  def get_jump(self) -> str:
-    return self.instruction.split(';')[1] if self.has_jump() else 'null'
+  def _get_jump(self) -> str:
+    return self.instruction.split(';')[1] if self._has_jump() else 'null'
 
-  def has_dest(self) -> bool:
+  def _has_dest(self) -> bool:
     return '=' in self.instruction
 
-  def has_jump(self) -> bool:
+  def _has_jump(self) -> bool:
     return ';' in self.instruction
 
-  def get_comp(self) -> str:
-    if self.has_dest() and self.has_jump():
+  def _get_comp(self) -> str:
+    if self._has_dest() and self._has_jump():
       return self. instruction.split('=')[1].split(';')[0]
-    if self.has_dest() and not self.has_jump():
+    if self._has_dest() and not self._has_jump():
       return self.instruction.split('=')[1]
-    if not self.has_dest() and self.has_jump():
+    if not self._has_dest() and self._has_jump():
       return self.instruction.split(';')[0]
     return self.instruction
 
 
-class InstructionTranslator():
-  def translate_instruction(self, asm_instruction: str) -> str:
-    if self._is_a_instruction(asm_instruction):
-      return self._translate_a_instruction(asm_instruction)
-    return self._translate_c_instruction(asm_instruction)
-
-  def is_label_or_variable(self, instruction: str) -> bool:
-    if not instruction.startswith('@'):
-      return False
-    value = instruction[1:]
-    return value not in SYMBOL_TABLE and not value.isnumeric()
-
-  def _is_a_instruction(self, instruction: str) -> bool:
-    return instruction.startswith('@')
-
-  def _translate_a_instruction(self, instruction: str) -> str:
-    value = instruction[1:]
-    if value in SYMBOL_TABLE:
-      value = SYMBOL_TABLE[value]
-    if value.isnumeric():
-      return f'0{dec_to_bin(int(value))}'
-    return value
-
-  def _translate_c_instruction(self, instruction: str) -> str:
-    return str(CInstruction(instruction))
-
-
-class InstructionsTranslator():
+class InstructionsParser():
   def __init__(self) -> None:
-    self.translator = InstructionTranslator()
-
-  def translate_instructions(self, asm_instructions: List[str]) -> List[str]:
     self._reset_variables()
-    self._process_lines(asm_instructions)
-    self._add_line_numbers_from_labels()
-    self._assign_addresses_to_variables()
-    return self.machine_instructions
-  
-  def _reset_variables(self) -> None:
-    self.machine_instructions = []
-    self.label_table = {}
-    self.label_variable_set = set()
-    self.line_number = 0
 
-  def _process_lines(self, asm_instructions: List[str]) -> None:
-    for line in asm_instructions:
+  def _reset_variables(self) -> None:
+    self._machine_instructions = []
+    self._line_number = 0
+
+  def parse_lines(self, lines: List[str]) -> List[str]:
+    for line in lines:
       if not line or line.startswith('//'):  # skip empty lines and comments
         continue
       line = self._remove_comment(line)  # remove comment from line if present
       if line.startswith('('):
-        self._add_label_to_table(line)
+        self._handle_label(line, self._line_number)
         continue
-      machine_instruction = self.translator.translate_instruction(line)
-      self.machine_instructions.append(machine_instruction)
-      if self.translator.is_label_or_variable(line):
-        self.label_variable_set.add(line[1:])
-      self.line_number += 1
+      machine_instruction = parse_instruction(line, self._line_number)
+      self._machine_instructions.append(machine_instruction)
+      self._line_number += 1
+    self._process_undefined_variables()
+    return self._machine_instructions
 
   def _remove_comment(self, line: str) -> str:
     if (where_comment := line.find('//')) != -1:
       return line[:where_comment].strip()
     return line
-
-  def _add_label_to_table(self, line: str) -> None:
+    
+  def _handle_label(self, line: str, line_number: int) -> None:
     label = line[1:-1]  # remove parentheses
-    self.label_table[label] = self.line_number
+    self._add_label_to_symbol_table(label, line_number)
+    self._process_label_through_undefined(label)
   
-  def _add_line_numbers_from_labels(self) -> None:
-    for label, value in self.label_table.items():
-      self._replace_label_or_variable_with_instruction(label, value)
-
-  def _assign_addresses_to_variables(self) -> None:
+  def _add_label_to_symbol_table(self, label: str, line_number: int) -> None:
+    SYMBOL_TABLE[label] = str(line_number)
+  
+  def _process_label_through_undefined(self, label: str) -> None:
+    if label not in UNDEFINED_VARIABLES_TABLE:
+      return
+    for line_number in UNDEFINED_VARIABLES_TABLE[label]:
+      value = int(SYMBOL_TABLE[label])
+      self._machine_instructions[line_number] = to_a_instruction(value)
+    UNDEFINED_VARIABLES_TABLE.pop(label, None)  # remove label from table
+  
+  def _process_undefined_variables(self) -> None:
     address = ADDRESS_SPACE_START
-    for variable in self.label_variable_set:
-      if variable in self.label_table.keys():
-        continue
+    for variable in UNDEFINED_VARIABLES_TABLE.values():
       if address > ADDRESS_SPACE_END:
         memory_limit_exceeded_exit()
-      self._replace_label_or_variable_with_instruction(variable, address)
+      for line_number in variable:
+        self._machine_instructions[line_number] = to_a_instruction(address)
       address += 1
-  
-  def _replace_label_or_variable_with_instruction(self, name: str, value: int) -> None:
-    machine_instruction = self.translator.translate_instruction(f'@{value}')
-    indices = [i for i, line in enumerate(self.machine_instructions) if line == name]
-    for i in indices:
-      self.machine_instructions[i] = machine_instruction
 
 
-def memory_limit_exceeded_exit() -> None:
-  sys.exit("Program memory limit exceeded, aborting...")
+def parse_instruction(line: str, line_number: int) -> str:
+  if line.startswith('@'):
+    return parse_a_instruction(line, line_number)
+  return parse_c_instruction(line)
+
+def parse_a_instruction(line: str, line_number: int) -> str:
+  value = line[1:]
+  if value in SYMBOL_TABLE:
+    value = SYMBOL_TABLE[value]
+  if value.isnumeric():
+    return to_a_instruction(int(value))
+  UNDEFINED_VARIABLES_TABLE.setdefault(value,[]).append(line_number)
+  return value
+
+def to_a_instruction(value: int) -> str:
+  return f'0{dec_to_bin(value)}'
 
 def dec_to_bin(value: int) -> str:
   return format(value, '015b')
 
+def parse_c_instruction(line: str) -> str:
+  return CInstruction(line).get_machine_code()
+
+def memory_limit_exceeded_exit() -> None:
+  sys.exit("Program memory limit exceeded, aborting...")
+
 def get_file_path() -> str:
   parser = argparse.ArgumentParser()
-  parser.add_argument('-f', '--File', help='Provide path to an Hack asm file')
+  parser.add_argument('-f', '--File', required=True, help='path to asm source file')
   args = parser.parse_args()
   return args.File
 
@@ -236,8 +225,8 @@ def read_file(file_path: str) -> List[str]:
 
 def main():
   file_path = get_file_path()
-  asm_instructions = read_file(file_path)
-  machine_instructions = InstructionsTranslator().translate_instructions(asm_instructions)
+  lines = read_file(file_path)
+  machine_instructions = InstructionsParser().parse_lines(lines)
   create_hack_file(file_path, machine_instructions)
 
 
